@@ -257,44 +257,143 @@ export default function YouTubeContentStudio(){
               <div className="field"><textarea rows={6} value={editingItem.content} onChange={(e)=> setEditingItem({...editingItem, content: e.target.value})} placeholder={editingItem.type==='headline' ? 'Headline text' : 'Notes / Script content'} /></div>
 
               {editingItem.type === 'script' && (
-                <div>
-                  <div className="sectionHead" onClick={()=> setEditingItem({...editingItem, hookCollapsed: !editingItem.hookCollapsed})}>
-                    <span>{editingItem.hookCollapsed ? '▸' : '▾'} Hook / Intro</span>
+              <div>
+                {/* Hook Section */}
+                <div className="collapsible">
+                  <div
+                    className="collapsible-header"
+                    onClick={() =>
+                      setEditingItem({ ...editingItem, hookCollapsed: !editingItem.hookCollapsed })
+                    }
+                  >
+                    <span>{editingItem.hookCollapsed ? '▸' : '▾'} Hook</span>
                   </div>
                   {!editingItem.hookCollapsed && (
-                    <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginTop:'10px'}}>
+                    <div className="grid-2 gap">
                       <div className="field">
                         <label>Planning</label>
-                        <textarea rows={4} value={editingItem.hookPlanning || ''} onChange={(e)=> setEditingItem({...editingItem, hookPlanning: e.target.value})} />
+                        <textarea
+                          className="textarea"
+                          rows={4}
+                          value={editingItem.hookPlanning || ''}
+                          onChange={(e) =>
+                            setEditingItem({ ...editingItem, hookPlanning: e.target.value })
+                          }
+                        />
                       </div>
                       <div className="field">
                         <label>Content</label>
-                        <textarea rows={4} value={editingItem.hookContent || ''} onChange={(e)=> setEditingItem({...editingItem, hookContent: e.target.value})} />
+                        <textarea
+                          className="textarea"
+                          rows={4}
+                          value={editingItem.hookContent || ''}
+                          onChange={(e) =>
+                            setEditingItem({ ...editingItem, hookContent: e.target.value })
+                          }
+                        />
                       </div>
                     </div>
                   )}
                 </div>
-              )}
 
-              {editingItem.type === 'script' && (
-                <div>
-                  <div className="sectionHead" onClick={()=> setEditingItem({...editingItem, sectionCollapsed: !editingItem.sectionCollapsed})}>
-                    <span>{editingItem.sectionCollapsed ? '▸' : '▾'} Section 1</span>
+                {/* Sections Controller */}
+                <div className="collapsible" style={{ marginTop: 8 }}>
+                  <div className="collapsible-header" style={{ cursor: 'default' }}>
+                    <span>Sections</span>
+                    <button
+                      className="btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingItem((prev) => {
+                          const list = Array.isArray(prev.sections) ? prev.sections : [];
+                          const nextIndex = list.length + 1;
+                          const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                          const newSec = {
+                            id,
+                            name: `Section ${nextIndex}`,
+                            collapsed: false,
+                            planning: '',
+                            content: '',
+                          };
+                          return { ...prev, sections: [...list, newSec] };
+                        });
+                      }}
+                    >
+                      ➕ Add Section
+                    </button>
                   </div>
-                  {!editingItem.sectionCollapsed && (
-                    <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginTop:'10px'}}>
-                      <div className="field">
-                        <label>Planning</label>
-                        <textarea rows={4} value={editingItem.sectionPlanning || ''} onChange={(e)=> setEditingItem({...editingItem, sectionPlanning: e.target.value})} />
-                      </div>
-                      <div className="field">
-                        <label>Content</label>
-                        <textarea rows={4} value={editingItem.sectionContent || ''} onChange={(e)=> setEditingItem({...editingItem, sectionContent: e.target.value})} />
+                </div>
+
+                {/* Render Sections */}
+                {(editingItem.sections || []).map((sec, i) => (
+                  <div key={sec.id || i} className="collapsible">
+                    <div
+                      className="collapsible-header"
+                      onClick={() =>
+                        setEditingItem((prev) => {
+                          const list = [...(prev.sections || [])];
+                          list[i] = { ...list[i], collapsed: !list[i]?.collapsed };
+                          return { ...prev, sections: list };
+                        })
+                      }
+                    >
+                      <span>{sec.collapsed ? '▸' : '▾'} {sec.name || `Section ${i + 1}`}</span>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          className="btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingItem((prev) => {
+                              const list = [...(prev.sections || [])];
+                              list.splice(i, 1);
+                              return { ...prev, sections: list };
+                            });
+                          }}
+                        >
+                          🗑️ Remove
+                        </button>
                       </div>
                     </div>
-                  )}
-                </div>
-              )}
+
+                    {!sec.collapsed && (
+                      <div className="grid-2 gap">
+                        <div className="field">
+                          <label>Planning</label>
+                          <textarea
+                            className="textarea"
+                            rows={4}
+                            value={sec.planning || ''}
+                            onChange={(e) =>
+                              setEditingItem((prev) => {
+                                const list = [...(prev.sections || [])];
+                                list[i] = { ...list[i], planning: e.target.value };
+                                return { ...prev, sections: list };
+                              })
+                            }
+                          />
+                        </div>
+                        <div className="field">
+                          <label>Content</label>
+                          <textarea
+                            className="textarea"
+                            rows={4}
+                            value={sec.content || ''}
+                            onChange={(e) =>
+                              setEditingItem((prev) => {
+                                const list = [...(prev.sections || [])];
+                                list[i] = { ...list[i], content: e.target.value };
+                                return { ...prev, sections: list };
+                              })
+                            }
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
 
             </div>
             <div className="modal-b" style={{display:'flex',justifyContent:'flex-end',gap:8}}>
