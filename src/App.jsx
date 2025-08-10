@@ -240,7 +240,7 @@ export default function YouTubeContentStudio(){
 
       {toast && <div className="toast">{toast}</div>}
 
-      {editingItem && (
+       {editingItem && (
         <div className="modal" onClick={(e)=>{ if(e.target===e.currentTarget) setEditingItem(null); }}>
           <div className="modal-card">
             <div className="modal-h">Edit {editingItem.type}</div>
@@ -255,6 +255,27 @@ export default function YouTubeContentStudio(){
               </div>
               <div className="field"><input type="text" value={(editingItem.tags||[]).join(", ")} onChange={(e)=> setEditingItem({...editingItem, tags: e.target.value.split(",").map(s=>s.trim()).filter(Boolean)})} placeholder="tags, comma, separated" /></div>
               <div className="field"><textarea rows={6} value={editingItem.content} onChange={(e)=> setEditingItem({...editingItem, content: e.target.value})} placeholder={editingItem.type==='headline' ? 'Headline text' : 'Notes / Script content'} /></div>
+
+              {editingItem.type === 'script' && (
+                <div>
+                  <div className="sectionHead" onClick={()=> setEditingItem({...editingItem, hookCollapsed: !editingItem.hookCollapsed})}>
+                    <span>{editingItem.hookCollapsed ? '▸' : '▾'} Hook</span>
+                  </div>
+                  {!editingItem.hookCollapsed && (
+                    <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginTop:'10px'}}>
+                      <div className="field">
+                        <label>Planning</label>
+                        <textarea rows={4} value={editingItem.hookPlanning || ''} onChange={(e)=> setEditingItem({...editingItem, hookPlanning: e.target.value})} />
+                      </div>
+                      <div className="field">
+                        <label>Content</label>
+                        <textarea rows={4} value={editingItem.hookContent || ''} onChange={(e)=> setEditingItem({...editingItem, hookContent: e.target.value})} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
             </div>
             <div className="modal-b" style={{display:'flex',justifyContent:'flex-end',gap:8}}>
               <button className="btn" onClick={()=> setEditingItem(null)}>Cancel</button>
