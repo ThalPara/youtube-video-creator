@@ -259,7 +259,7 @@ export default function YouTubeContentStudio(){
               {editingItem.type === 'script' && (
                 <div>
                   <div className="sectionHead" onClick={()=> setEditingItem({...editingItem, hookCollapsed: !editingItem.hookCollapsed})}>
-                    <span>{editingItem.hookCollapsed ? '▸' : '▾'} Hook</span>
+                    <span>{editingItem.hookCollapsed ? '▸' : '▾'} Hook / Intro</span>
                   </div>
                   {!editingItem.hookCollapsed && (
                     <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginTop:'10px'}}>
@@ -278,18 +278,18 @@ export default function YouTubeContentStudio(){
 
               {editingItem.type === 'script' && (
                 <div>
-                  <div className="sectionHead" onClick={()=> setEditingItem({...editingItem, hookCollapsed: !editingItem.hookCollapsed})}>
-                    <span>{editingItem.hookCollapsed ? '▸' : '▾'} Hook</span>
+                  <div className="sectionHead" onClick={()=> setEditingItem({...editingItem, sectionCollapsed: !editingItem.sectionCollapsed})}>
+                    <span>{editingItem.sectionCollapsed ? '▸' : '▾'} Section 1</span>
                   </div>
-                  {!editingItem.hookCollapsed && (
+                  {!editingItem.sectionCollapsed && (
                     <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginTop:'10px'}}>
                       <div className="field">
                         <label>Planning</label>
-                        <textarea rows={4} value={editingItem.hookPlanning || ''} onChange={(e)=> setEditingItem({...editingItem, hookPlanning: e.target.value})} />
+                        <textarea rows={4} value={editingItem.sectionPlanning || ''} onChange={(e)=> setEditingItem({...editingItem, sectionPlanning: e.target.value})} />
                       </div>
                       <div className="field">
                         <label>Content</label>
-                        <textarea rows={4} value={editingItem.hookContent || ''} onChange={(e)=> setEditingItem({...editingItem, hookContent: e.target.value})} />
+                        <textarea rows={4} value={editingItem.sectionContent || ''} onChange={(e)=> setEditingItem({...editingItem, sectionContent: e.target.value})} />
                       </div>
                     </div>
                   )}
