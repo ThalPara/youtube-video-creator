@@ -66,45 +66,27 @@ export default function App() {
   }, [listings, threshold, requireArea, sort]);
 
   async function fetchListings() {
-  setLoading(true);
-  setError(null);
-  try {
-    const resp = await fetch("/api/fetch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify({
-        rightmoveUrl: rightmoveUrl || undefined,
-        zooplaUrl: zooplaUrl || undefined,
-      }),
-    });
-
-    const contentType = resp.headers.get("content-type") || "";
-    const rawText = await resp.text();
-
-    let data = null;
-    if (contentType.includes("application/json")) {
-      try {
-        data = JSON.parse(rawText);
-      } catch (err) {
-        throw new Error(`Invalid JSON from API: ${err}`);
-      }
-    } else {
-      throw new Error(`Server returned non-JSON (${contentType}): ${rawText.slice(0, 200)}...`);
+    setLoading(true);
+    setError(null);
+    try {
+      const resp = await fetch("/api/fetch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rightmoveUrl: rightmoveUrl || undefined,
+          zooplaUrl: zooplaUrl || undefined,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || "Failed to fetch");
+      setListings(data?.listings || []);
+    } catch (e: any) {
+      setError(e?.message || "Something went wrong");
+      setListings([]);
+    } finally {
+      setLoading(false);
     }
-
-    if (!resp.ok) {
-      throw new Error(data?.error || `API error ${resp.status}`);
-    }
-
-    setListings(Array.isArray(data?.listings) ? data.listings : []);
-  } catch (e) {
-    setError(e?.message || "Something went wrong");
-    setListings([]);
-  } finally {
-    setLoading(false);
   }
-}
-
 
   const fmtGBP = (n?: number) =>
     Number.isFinite(n as number)
