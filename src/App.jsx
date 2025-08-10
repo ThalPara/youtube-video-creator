@@ -1,256 +1,408 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Search, ExternalLink, Sun, Moon, TriangleAlert, ArrowUpDown } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
-// Types
-interface Listing {
-  source: string;
-  title: string;
-  address: string;
-  price?: number;
-  beds?: string;
-  sqm?: number;
-  sqft?: number;
-  pricePerSqm?: number;
-  pricePerSqft?: number;
-  undervaluePct?: number;
-  link?: string;
-}
+// YouTube Content Studio – single-file React app
+// Adds Light/Dark theme toggle with localStorage + prefers-color-scheme
 
-function useTheme() {
-  const [theme, setTheme] = useState<string>(() => {
-    if (typeof window === "undefined") return "dark";
-    return (localStorage.getItem("theme") as string) || "dark";
+const STORAGE_KEY = "yt_content_studio_v8";
+const THEME_KEY = "ytcs_theme";
+const nowISO = () => new Date().toISOString();
+const fmt = (iso) => new Date(iso).toLocaleString();
+const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+function useLocalStorageArray(key, initial) {
+  const [items, setItems] = useState(() => {
+    if (typeof window === "undefined") return initial;
+    try {
+      const raw = window.localStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : initial;
+      return Array.isArray(parsed) ? parsed : initial;
+    } catch { return initial; }
   });
   useEffect(() => {
-    if (typeof document !== "undefined") {
-      document.documentElement.dataset.theme = theme;
-      localStorage.setItem("theme", theme);
-    }
-  }, [theme]);
-  const toggle = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
-  return { theme, toggle };
+    if (typeof window === "undefined") return;
+    try { window.localStorage.setItem(key, JSON.stringify(items)); } catch {}
+  }, [key, items]);
+  return [items, setItems];
 }
 
-export default function App() {
-  const [rightmoveUrl, setRightmoveUrl] = useState("");
-  const [zooplaUrl, setZooplaUrl] = useState("");
-  const [threshold, setThreshold] = useState<number>(20);
-  const [requireArea, setRequireArea] = useState<boolean>(true);
-  const [sort, setSort] = useState<"uv" | "price" | "sqm">("uv");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [listings, setListings] = useState<Listing[]>([]);
+function useTheme(defaultMode = "system") {
+  const getInitial = () => {
+    if (typeof window === "undefined") return "dark";
+    const saved = window.localStorage.getItem(THEME_KEY);
+    if (saved) return saved;
+    return defaultMode;
+  };
+  const [mode, setMode] = useState(getInitial);
 
-  const { theme, toggle } = useTheme();
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const root = document.documentElement;
+    const effective = mode === "system"
+      ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : mode;
+    root.dataset.theme = effective; // used by CSS
+    try { window.localStorage.setItem(THEME_KEY, mode); } catch {}
+  }, [mode]);
 
-  const filtered = useMemo(() => {
-    const hasArea = (x: Listing) => Number.isFinite(x.sqm) && (x.sqm ?? 0) > 0;
-    let arr = (listings || []).filter(
-      (x) => Number.isFinite(x.undervaluePct) && (x.undervaluePct ?? -999) >= threshold && (!requireArea || hasArea(x))
-    );
-    arr = [...arr].sort((a, b) => {
-      if (sort === "uv") return (b.undervaluePct ?? -999) - (a.undervaluePct ?? -999);
-      if (sort === "price") return (a.price ?? Number.POSITIVE_INFINITY) - (b.price ?? Number.POSITIVE_INFINITY);
-      if (sort === "sqm") return (a.pricePerSqm ?? Number.POSITIVE_INFINITY) - (b.pricePerSqm ?? Number.POSITIVE_INFINITY);
-      return 0;
-    });
-    return arr;
-  }, [listings, threshold, requireArea, sort]);
+  return [mode, setMode];
+}
 
-  async function fetchListings() {
-    setLoading(true);
-    setError(null);
-    try {
-      const resp = await fetch("/api/fetch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rightmoveUrl: rightmoveUrl || undefined,
-          zooplaUrl: zooplaUrl || undefined,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error || "Failed to fetch");
-      setListings(data?.listings || []);
-    } catch (e: any) {
-      setError(e?.message || "Something went wrong");
-      setListings([]);
-    } finally {
-      setLoading(false);
-    }
-  }
+export default function YouTubeContentStudio(){
+  const [items, setItems] = useLocalStorageArray(STORAGE_KEY, []);
+  const [mode, setMode] = useTheme(); // "light" | "dark" | "system"
+  const [query, setQuery] = useState("");
+  const [editingItem, setEditingItem] = useState(null);
+  const [toast, setToast] = useState("");
+  const [collapsed, setCollapsed] = useState({}); // video-level collapse
+  const [subCollapsed, setSubCollapsed] = useState({}); // section-level collapse
+  const fileInputRef = useRef(null);
 
-  const fmtGBP = (n?: number) =>
-    Number.isFinite(n as number)
-      ? new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 }).format(n as number)
-      : "—";
-  const fmt = (n?: number, d = 0) => (Number.isFinite(n as number) ? Number(n).toFixed(d) : "—");
+  const showToast = (msg) => { setToast(msg); setTimeout(()=> setToast(""), 2000); };
+
+  const createBase = (type, parentId=null) => ({ id: uid(), type, parentId, title: "", content: "", tags: [], status: "idea", createdAt: nowISO(), updatedAt: nowISO() });
+  const createVideo = () => {
+    const v = { ...createBase("video"), title: "New Video" };
+    setItems(prev => [v, ...prev]);
+    setCollapsed(prev => ({ ...prev, [v.id]: false }));
+    showToast("Video created");
+  };
+  const createChild = (videoId, type) => {
+    let base = createBase(type, videoId);
+    if (type === "headline") base.content = "Punchy headline idea";
+    if (type === "script") base.title = "Script";
+    if (type === "thumbnail") base.title = "Thumbnail";
+    setItems(prev => [base, ...prev]);
+    showToast(`${type[0].toUpperCase()+type.slice(1)} added`);
+  };
+  const upsertItem = (item) => setItems(prev => prev.map(p => p.id === item.id ? {...item, updatedAt: nowISO()} : p));
+  const removeItem = (id) => { setItems(prev => prev.filter(p => p.id !== id && p.parentId !== id)); showToast("Deleted"); };
+
+  const exportJson = () => {
+    const blob = new Blob([JSON.stringify(items, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `yt-studio-${new Date().toISOString().slice(0,10)}.json`; a.click();
+    URL.revokeObjectURL(url);
+    showToast("Exported JSON");
+  };
+
+  const onImport = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try { const data = JSON.parse(String(reader.result)); if (Array.isArray(data)) { setItems(data); showToast("Imported JSON"); } else showToast("Invalid JSON"); }
+      catch { showToast("Invalid JSON"); }
+    };
+    reader.readAsText(file);
+  };
+
+  const saveEdit = () => { if (editingItem) { upsertItem(editingItem); setEditingItem(null); showToast("Saved"); } };
+
+  const videos = useMemo(() => items.filter(i => i.type === "video" && (i.title.toLowerCase().includes(query.toLowerCase()) || query === "")), [items, query]);
+  const childrenOf = (videoId) => items.filter(i => i.parentId === videoId);
+
+  const css = `
+    :root{--bg:#0b1020;--text:#e5e7eb;--muted:#9aa7bd;--panel:#10172a;--panel2:#0f1326;--stroke:#1f2937;--stroke2:#243049;--brand:#6d95ff;--accent:#5a7ee6}
+    :root[data-theme='light']{--bg:#f8fafc;--text:#0b1224;--muted:#6b7280;--panel:#ffffff;--panel2:#f1f5f9;--stroke:#e5e7eb;--stroke2:#d1d5db;--brand:#3b82f6;--accent:#2563eb}
+
+    *{box-sizing:border-box}body{margin:0}
+    .app{min-height:100vh;background:radial-gradient(1200px 600px at -10% -10%, #1f2a4422 0%, transparent 60%), radial-gradient(900px 500px at 110% -10%, #0b3b5e22 0%, transparent 60%), var(--bg); color:var(--text);font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial}
+    .header{position:sticky;top:0;background:color-mix(in oklab, var(--bg), transparent 20%);backdrop-filter:blur(8px);border-bottom:1px solid var(--stroke);z-index:10}
+    .header-inner{max-width:1100px;margin:0 auto;padding:14px 20px;display:flex;gap:10px;align-items:center}
+    .input{background:var(--panel2);border:1px solid var(--stroke2);color:var(--text);padding:10px 12px;border-radius:12px;outline:none;min-width:240px}
+    .input:focus{border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in oklab, var(--brand), transparent 80%)}
+    .btn{border:1px solid var(--stroke2);background:var(--panel);color:var(--text);padding:8px 10px;border-radius:10px;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem}
+    .btn:hover{border-color:var(--brand)}
+    .btn.primary{background:linear-gradient(180deg,var(--brand),var(--accent));border-color:var(--accent);color:white}
+    .toolbar{display:flex;gap:8px;align-items:center;margin-left:auto}
+    .container{max-width:1100px;margin:0 auto;padding:20px}
+    .grid{display:grid;gap:16px;grid-template-columns:1fr}
+    .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--stroke);border-radius:16px;overflow:hidden;box-shadow:0 8px 26px #0004}
+    .card-h{padding:12px 14px;background:var(--panel2);display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--stroke)}
+    .card-content{padding:14px}
+    .meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end;color:var(--muted);font-size:.9rem}
+    .pill{font-size:.8rem;padding:3px 8px;border-radius:999px;background:color-mix(in oklab, var(--panel2), var(--bg) 30%);border:1px solid var(--stroke2)}
+    .rows{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+    .row{display:flex;justify-content:space-between;align-items:center;padding:10px;border:1px solid var(--stroke2);border-radius:12px;background:var(--panel2)}
+    .footer{padding:10px 14px;border-top:1px solid var(--stroke);display:flex;justify-content:space-between;color:var(--muted);font-size:.85rem}
+    .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--stroke2);color:var(--text);padding:8px 12px;border-radius:10px}
+    .modal{position:fixed;inset:0;background:#0007;display:flex;align-items:center;justify-content:center;padding:20px}
+    .modal-card{width:min(560px,90vw);background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--stroke);border-radius:14px;overflow:hidden}
+    .modal-h{padding:12px 14px;border-bottom:1px solid var(--stroke);font-weight:800}
+    .modal-b{padding:14px;display:grid;gap:10px}
+    .field input,.field textarea,.field select{width:100%;background:var(--panel2);border:1px solid var(--stroke2);color:var(--text);padding:10px 12px;border-radius:10px}
+    .sectionHead{background:var(--panel2);border:1px solid var(--stroke2);border-radius:10px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;margin-top:10px}
+  `;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[rgb(12,18,32)] to-[rgb(11,15,20)] text-[var(--text)] p-6">
-      <div className="mx-auto max-w-6xl space-y-4">
-        {/* Top bar */}
-        <Card className="backdrop-blur supports-[backdrop-filter]:bg-white/5 border-white/10">
-          <CardContent className="flex items-center justify-between gap-3 p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-7 w-7 rounded-md bg-gradient-to-br from-blue-400 to-blue-600" />
-              <div className="font-extrabold tracking-tight">Undervalued Property Finder</div>
-              <Badge variant="secondary" className="ml-1">Beta</Badge>
-            </div>
-            <Button variant="outline" onClick={toggle} className="gap-2 border-white/20">
-              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              <span className="hidden sm:inline">{theme === "dark" ? "Light" : "Dark"} mode</span>
-            </Button>
-          </CardContent>
-        </Card>
+    <div className="app">
+      <style>{css}</style>
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr_.8fr]">
-          {/* Search panel */}
-          <Card className="border-white/10">
-            <CardHeader>
-              <CardTitle>Search sources</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Rightmove search URL</Label>
-                  <Input placeholder="https://www.rightmove.co.uk/property-for-sale/find.html?..." value={rightmoveUrl} onChange={(e) => setRightmoveUrl(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Zoopla search URL (optional)</Label>
-                  <Input placeholder="https://www.zoopla.co.uk/for-sale/property/..." value={zooplaUrl} onChange={(e) => setZooplaUrl(e.target.value)} />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-[auto_auto_1fr]">
-                <div className="flex items-center gap-3 rounded-full border border-white/10 px-3 py-2">
-                  <Label className="text-sm">Threshold</Label>
-                  <Input type="number" className="w-24 border-none bg-transparent p-0" min={5} max={60} step={1} value={threshold} onChange={(e) => setThreshold(Math.max(0, Number(e.target.value || 0)))} />
-                  <span className="text-sm text-muted-foreground">%</span>
-                </div>
-                <div className="flex items-center gap-3 rounded-full border border-white/10 px-3 py-2">
-                  <Label className="text-sm">Require area</Label>
-                  <Switch checked={requireArea} onCheckedChange={setRequireArea} />
-                </div>
-                <div className="flex items-center justify-end gap-3">
-                  <Select value={sort} onValueChange={(v: any) => setSort(v)}>
-                    <SelectTrigger className="w-56">
-                      <SelectValue placeholder="Sort by" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="uv">Sort: Undervalue %</SelectItem>
-                      <SelectItem value="price">Sort: Price</SelectItem>
-                      <SelectItem value="sqm">Sort: £/m²</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button className="gap-2" onClick={fetchListings} disabled={loading}>
-                    {loading ? (
-                      <span className="mr-1 inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                    ) : (
-                      <Search className="h-4 w-4" />
-                    )}
-                    {loading ? "Fetching…" : "Fetch listings"}
-                  </Button>
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">Tip: Apply filters on the portals, copy the results URL, paste here.</p>
-            </CardContent>
-          </Card>
-
-          {/* Summary */}
-          <Card className="border-white/10">
-            <CardHeader>
-              <CardTitle>Summary</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {error ? (
-                <div className="flex items-center gap-2 text-red-400">
-                  <TriangleAlert className="h-4 w-4" />
-                  <span>{error}</span>
-                </div>
-              ) : listings.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No data yet. Paste a search and click Fetch.</p>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  <b>{filtered.length}</b> undervalued of <b>{listings.length}</b> listings (≥ {threshold}%{requireArea ? ", area required" : ""}).
-                </p>
-              )}
-            </CardContent>
-          </Card>
+      <div className="header">
+        <div className="header-inner">
+          <div style={{fontWeight:800}}>📺 YouTube Content Studio</div>
+          <input className="input" placeholder="Search videos…" value={query} onChange={(e)=> setQuery(e.target.value)} />
+          <div className="toolbar">
+            <button className="btn" onClick={()=> fileInputRef.current?.click()}>📥 Import</button>
+            <button className="btn" onClick={exportJson}>📤 Export</button>
+            <button className="btn" onClick={createVideo}>➕ New Video</button>
+            <select className="input" style={{minWidth:120}} value={mode} onChange={(e)=> setMode(e.target.value)} title="Theme">
+              <option value="system">🖥️ System</option>
+              <option value="light">☀️ Light</option>
+              <option value="dark">🌙 Dark</option>
+            </select>
+            <input ref={fileInputRef} type="file" accept="application/json" style={{display:'none'}} onChange={(e)=>{ const f=e.target.files?.[0]; if(f) onImport(f); e.currentTarget.value=""; }} />
+          </div>
         </div>
+      </div>
 
-        {/* Results */}
-        {listings.length > 0 && (
-          <Card className="border-white/10">
-            <CardHeader className="flex-row items-center justify-between">
-              <CardTitle>Results</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Listing</TableHead>
-                      <TableHead className="whitespace-nowrap">Price</TableHead>
-                      <TableHead className="whitespace-nowrap">Size</TableHead>
-                      <TableHead className="whitespace-nowrap">Unit price</TableHead>
-                      <TableHead className="whitespace-nowrap">Undervalue</TableHead>
-                      <TableHead></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filtered.map((item, idx) => (
-                      <TableRow key={idx}>
-                        <TableCell>
-                          <div className="font-semibold leading-tight">{item.title || "—"}</div>
-                          <div className="text-xs text-muted-foreground">{item.source} • {item.address || ""}</div>
-                        </TableCell>
-                        <TableCell>
-                          <div>{fmtGBP(item.price)}</div>
-                          <div className="text-xs text-muted-foreground">{item.beds || ""}</div>
-                        </TableCell>
-                        <TableCell>
-                          <div>{Number.isFinite(item.sqm as number) ? `${fmt(item.sqm, 0)} m²` : "—"}</div>
-                          <div className="text-xs text-muted-foreground">{Number.isFinite(item.sqft as number) ? `${fmt(item.sqft, 0)} ft²` : ""}</div>
-                        </TableCell>
-                        <TableCell>
-                          <div>{Number.isFinite(item.pricePerSqm as number) ? `${fmt(item.pricePerSqm, 0)} £/m²` : "—"}</div>
-                          <div className="text-xs text-muted-foreground">{Number.isFinite(item.pricePerSqft as number) ? `${fmt(item.pricePerSqft, 0)} £/ft²` : ""}</div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={Number.isFinite(item.undervaluePct as number) && (item.undervaluePct as number) >= 0 ? "default" : "destructive"}>
-                            {Number.isFinite(item.undervaluePct as number) ? `${fmt(item.undervaluePct, 0)}%` : "—"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Button variant="outline" asChild className="gap-2">
-                            <a href={item.link || "#"} target="_blank" rel="noreferrer">
-                              View <ExternalLink className="h-4 w-4" />
-                            </a>
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                {filtered.length === 0 && (
-                  <div className="py-8 text-center text-sm text-muted-foreground">No results match your filters.</div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+      <div className="container">
+        {videos.length ? (
+          <div className="grid">
+            {videos.map(v => {
+              const kids = childrenOf(v.id);
+              const scripts = kids.filter(k=>k.type==='script');
+              const thumbs = kids.filter(k=>k.type==='thumbnail');
+              const heads = kids.filter(k=>k.type==='headline');
+              const isCollapsed = collapsed[v.id];
+
+              const Section = ({label, data, type}) => {
+                const subId = `${v.id}:${label}`;
+                const subIsCollapsed = subCollapsed[subId] ?? false; // default open
+                return (
+                  <div>
+                    <div className="sectionHead" onClick={()=> setSubCollapsed(prev=>({ ...prev, [subId]: !subIsCollapsed }))}>
+                      <span style={{display:'flex',alignItems:'center',gap:8}}>{subIsCollapsed ? '▸' : '▾'} {label} <span className="pill">{data.length}</span></span>
+                      <span style={{display:'flex',alignItems:'center',gap:8}}>
+                        {type==='script' && (
+                          <button className="btn" onClick={(e)=>{ e.stopPropagation(); createChild(v.id,'script'); }}>➕ New</button>
+                        )}
+                        {type==='thumbnail' && (
+                          <button className="btn" onClick={(e)=>{ e.stopPropagation(); createChild(v.id,'thumbnail'); }}>➕ Add</button>
+                        )}
+                        {type==='headline' && (
+                          <button className="btn" onClick={(e)=>{ e.stopPropagation(); createChild(v.id,'headline'); }}>➕ Add</button>
+                        )}
+                      </span>
+                    </div>
+                    {!subIsCollapsed && (
+                      <div className="rows">
+                        {data.length ? data.map(item => (
+                          <div key={item.id} className="row">
+                            <div>{item.type==='script'?'📝':item.type==='thumbnail'?'🖼️':'💬'} {item.title || 'Untitled'}</div>
+                            <div className="meta">
+                              <span className="pill">{item.status}</span>
+                              <button className="btn" onClick={()=> setEditingItem(item)}>✏️ Edit</button>
+                              <button className="btn" onClick={()=> removeItem(item.id)}>🗑️ Delete</button>
+                            </div>
+                          </div>
+                        )) : <div className="row" style={{justifyContent:'center',color:'var(--muted)'}}>Empty</div>}
+                      </div>
+                    )}
+                  </div>
+                );
+              };
+
+              return (
+                <div key={v.id} className="card">
+                  <div className="card-h" onClick={()=> setCollapsed(prev=> ({...prev, [v.id]: !isCollapsed}))}>
+                    <div style={{fontWeight:700}}>🎬 {v.title || 'Untitled Video'}</div>
+                    <div className="meta">
+                      <span className="pill">{scripts.length} Scripts</span>
+                      <span className="pill">{thumbs.length} Thumbs</span>
+                      <span className="pill">{heads.length} Headlines</span>
+                      <span>{isCollapsed ? '▸' : '▾'}</span>
+                    </div>
+                  </div>
+
+                  {!isCollapsed && (
+                    <div className="card-content">
+                      <div className="meta" style={{marginBottom:10}}>
+                        <button className="btn" onClick={()=> setEditingItem(v)}>✏️ Edit</button>
+                        <button className="btn" onClick={()=> removeItem(v.id)}>🗑️ Delete</button>
+                      </div>
+                      <Section label="Scripts" data={scripts} type="script" />
+                      <Section label="Thumbnails" data={thumbs} type="thumbnail" />
+                      <Section label="Headlines" data={heads} type="headline" />
+                      <div className="footer">
+                        <span>Updated {fmt(v.updatedAt || v.createdAt)}</span>
+                        <span>ID: {v.id.slice(-6)}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{border:'1px dashed var(--stroke2)',padding:24,borderRadius:12,color:'var(--muted)',textAlign:'center'}}>No videos yet. Click <b>➕ New Video</b> to start a project.</div>
         )}
       </div>
 
-      {/* Light / dark CSS vars */}
-      <style>{`:root{--text:#e6edf6} :root[data-theme="light"]{--text:#0b1220}`}</style>
+      {toast && <div className="toast">{toast}</div>}
+
+       {editingItem && (
+        <div className="modal" onClick={(e)=>{ if(e.target===e.currentTarget) setEditingItem(null); }}>
+          <div className="modal-card">
+            <div className="modal-h">Edit {editingItem.type}</div>
+            <div className="modal-b">
+              <div className="field"><input type="text" value={editingItem.title} onChange={(e)=> setEditingItem({...editingItem, title: e.target.value})} placeholder="Title" /></div>
+              <div className="field">
+                <select value={editingItem.status} onChange={(e)=> setEditingItem({...editingItem, status: e.target.value})}>
+                  <option value="idea">idea</option>
+                  <option value="draft">draft</option>
+                  <option value="final">final</option>
+                </select>
+              </div>
+              <div className="field"><input type="text" value={(editingItem.tags||[]).join(", ")} onChange={(e)=> setEditingItem({...editingItem, tags: e.target.value.split(",").map(s=>s.trim()).filter(Boolean)})} placeholder="tags, comma, separated" /></div>
+              <div className="field"><textarea rows={6} value={editingItem.content} onChange={(e)=> setEditingItem({...editingItem, content: e.target.value})} placeholder={editingItem.type==='headline' ? 'Headline text' : 'Notes / Script content'} /></div>
+
+              {editingItem.type === 'script' && (
+              <div>
+                {/* Hook Section */}
+                <div className="collapsible">
+                  <div
+                    className="collapsible-header"
+                    onClick={() =>
+                      setEditingItem({ ...editingItem, hookCollapsed: !editingItem.hookCollapsed })
+                    }
+                  >
+                    <span>{editingItem.hookCollapsed ? '▸' : '▾'} Hook</span>
+                  </div>
+                  {!editingItem.hookCollapsed && (
+                    <div className="grid-2 gap">
+                      <div className="field">
+                        <label>Planning</label>
+                        <textarea
+                          className="textarea"
+                          rows={4}
+                          value={editingItem.hookPlanning || ''}
+                          onChange={(e) =>
+                            setEditingItem({ ...editingItem, hookPlanning: e.target.value })
+                          }
+                        />
+                      </div>
+                      <div className="field">
+                        <label>Content</label>
+                        <textarea
+                          className="textarea"
+                          rows={4}
+                          value={editingItem.hookContent || ''}
+                          onChange={(e) =>
+                            setEditingItem({ ...editingItem, hookContent: e.target.value })
+                          }
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Sections Controller */}
+                <div className="collapsible" style={{ marginTop: 8 }}>
+                  <div className="collapsible-header" style={{ cursor: 'default' }}>
+                    <span>Sections</span>
+                    <button
+                      className="btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingItem((prev) => {
+                          const list = Array.isArray(prev.sections) ? prev.sections : [];
+                          const nextIndex = list.length + 1;
+                          const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                          const newSec = {
+                            id,
+                            name: `Section ${nextIndex}`,
+                            collapsed: false,
+                            planning: '',
+                            content: '',
+                          };
+                          return { ...prev, sections: [...list, newSec] };
+                        });
+                      }}
+                    >
+                      ➕ Add Section
+                    </button>
+                  </div>
+                </div>
+
+                {/* Render Sections */}
+                {(editingItem.sections || []).map((sec, i) => (
+                  <div key={sec.id || i} className="collapsible">
+                    <div
+                      className="collapsible-header"
+                      onClick={() =>
+                        setEditingItem((prev) => {
+                          const list = [...(prev.sections || [])];
+                          list[i] = { ...list[i], collapsed: !list[i]?.collapsed };
+                          return { ...prev, sections: list };
+                        })
+                      }
+                    >
+                      <span>{sec.collapsed ? '▸' : '▾'} {sec.name || `Section ${i + 1}`}</span>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          className="btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingItem((prev) => {
+                              const list = [...(prev.sections || [])];
+                              list.splice(i, 1);
+                              return { ...prev, sections: list };
+                            });
+                          }}
+                        >
+                          🗑️ Remove
+                        </button>
+                      </div>
+                    </div>
+
+                    {!sec.collapsed && (
+                      <div className="grid-2 gap">
+                        <div className="field">
+                          <label>Planning</label>
+                          <textarea
+                            className="textarea"
+                            rows={4}
+                            value={sec.planning || ''}
+                            onChange={(e) =>
+                              setEditingItem((prev) => {
+                                const list = [...(prev.sections || [])];
+                                list[i] = { ...list[i], planning: e.target.value };
+                                return { ...prev, sections: list };
+                              })
+                            }
+                          />
+                        </div>
+                        <div className="field">
+                          <label>Content</label>
+                          <textarea
+                            className="textarea"
+                            rows={4}
+                            value={sec.content || ''}
+                            onChange={(e) =>
+                              setEditingItem((prev) => {
+                                const list = [...(prev.sections || [])];
+                                list[i] = { ...list[i], content: e.target.value };
+                                return { ...prev, sections: list };
+                              })
+                            }
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+
+            </div>
+            <div className="modal-b" style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+              <button className="btn" onClick={()=> setEditingItem(null)}>Cancel</button>
+              <button className="btn primary" onClick={saveEdit}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
