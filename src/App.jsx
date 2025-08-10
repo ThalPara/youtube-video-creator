@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 // YouTube Content Studio – single-file React app
-// Videos → (Scripts, Thumbnails, Headlines) with collapsible sections and header actions
+// Adds Light/Dark theme toggle with localStorage + prefers-color-scheme
 
-const STORAGE_KEY = "yt_content_studio_v7";
+const STORAGE_KEY = "yt_content_studio_v8";
+const THEME_KEY = "ytcs_theme";
 const nowISO = () => new Date().toISOString();
 const fmt = (iso) => new Date(iso).toLocaleString();
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -24,8 +25,31 @@ function useLocalStorageArray(key, initial) {
   return [items, setItems];
 }
 
+function useTheme(defaultMode = "system") {
+  const getInitial = () => {
+    if (typeof window === "undefined") return "dark";
+    const saved = window.localStorage.getItem(THEME_KEY);
+    if (saved) return saved;
+    return defaultMode;
+  };
+  const [mode, setMode] = useState(getInitial);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const root = document.documentElement;
+    const effective = mode === "system"
+      ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : mode;
+    root.dataset.theme = effective; // used by CSS
+    try { window.localStorage.setItem(THEME_KEY, mode); } catch {}
+  }, [mode]);
+
+  return [mode, setMode];
+}
+
 export default function YouTubeContentStudio(){
   const [items, setItems] = useLocalStorageArray(STORAGE_KEY, []);
+  const [mode, setMode] = useTheme(); // "light" | "dark" | "system"
   const [query, setQuery] = useState("");
   const [editingItem, setEditingItem] = useState(null);
   const [toast, setToast] = useState("");
@@ -77,34 +101,36 @@ export default function YouTubeContentStudio(){
   const childrenOf = (videoId) => items.filter(i => i.parentId === videoId);
 
   const css = `
-    :root{--bg:#0b1020;--text:#e5e7eb;--muted:#9aa7bd;--panel:#10172a;--panel2:#0f1326;--stroke:#1f2937;--stroke2:#243049;--brand:#6d95ff}
+    :root{--bg:#0b1020;--text:#e5e7eb;--muted:#9aa7bd;--panel:#10172a;--panel2:#0f1326;--stroke:#1f2937;--stroke2:#243049;--brand:#6d95ff;--accent:#5a7ee6}
+    :root[data-theme='light']{--bg:#f8fafc;--text:#0b1224;--muted:#6b7280;--panel:#ffffff;--panel2:#f1f5f9;--stroke:#e5e7eb;--stroke2:#d1d5db;--brand:#3b82f6;--accent:#2563eb}
+
     *{box-sizing:border-box}body{margin:0}
-    .app{min-height:100vh;background:radial-gradient(1200px 600px at -10% -10%, #1f2a44 0%, transparent 60%), radial-gradient(900px 500px at 110% -10%, #0b3b5e33 0%, transparent 60%), var(--bg); color:var(--text);font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial}
-    .header{position:sticky;top:0;background:#0b1020cc;backdrop-filter:blur(8px);border-bottom:1px solid var(--stroke);z-index:10}
+    .app{min-height:100vh;background:radial-gradient(1200px 600px at -10% -10%, #1f2a4422 0%, transparent 60%), radial-gradient(900px 500px at 110% -10%, #0b3b5e22 0%, transparent 60%), var(--bg); color:var(--text);font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial}
+    .header{position:sticky;top:0;background:color-mix(in oklab, var(--bg), transparent 20%);backdrop-filter:blur(8px);border-bottom:1px solid var(--stroke);z-index:10}
     .header-inner{max-width:1100px;margin:0 auto;padding:14px 20px;display:flex;gap:10px;align-items:center}
     .input{background:var(--panel2);border:1px solid var(--stroke2);color:var(--text);padding:10px 12px;border-radius:12px;outline:none;min-width:240px}
-    .input:focus{border-color:var(--brand);box-shadow:0 0 0 3px #6d95ff33}
+    .input:focus{border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in oklab, var(--brand), transparent 80%)}
     .btn{border:1px solid var(--stroke2);background:var(--panel);color:var(--text);padding:8px 10px;border-radius:10px;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem}
     .btn:hover{border-color:var(--brand)}
-    .btn.primary{background:linear-gradient(180deg,#6d95ff,#5a7ee6);border-color:#5a7ee6}
+    .btn.primary{background:linear-gradient(180deg,var(--brand),var(--accent));border-color:var(--accent);color:white}
     .toolbar{display:flex;gap:8px;align-items:center;margin-left:auto}
     .container{max-width:1100px;margin:0 auto;padding:20px}
     .grid{display:grid;gap:16px;grid-template-columns:1fr}
-    .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--stroke);border-radius:16px;overflow:hidden;box-shadow:0 8px 26px #0006}
-    .card-h{padding:12px 14px;background:#0f172a;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--stroke)}
+    .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--stroke);border-radius:16px;overflow:hidden;box-shadow:0 8px 26px #0004}
+    .card-h{padding:12px 14px;background:var(--panel2);display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--stroke)}
     .card-content{padding:14px}
     .meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end;color:var(--muted);font-size:.9rem}
-    .pill{font-size:.8rem;padding:3px 8px;border-radius:999px;background:#0c1a35;border:1px solid var(--stroke2)}
+    .pill{font-size:.8rem;padding:3px 8px;border-radius:999px;background:color-mix(in oklab, var(--panel2), var(--bg) 30%);border:1px solid var(--stroke2)}
     .rows{display:flex;flex-direction:column;gap:8px;margin-top:8px}
     .row{display:flex;justify-content:space-between;align-items:center;padding:10px;border:1px solid var(--stroke2);border-radius:12px;background:var(--panel2)}
     .footer{padding:10px 14px;border-top:1px solid var(--stroke);display:flex;justify-content:space-between;color:var(--muted);font-size:.85rem}
-    .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111827;border:1px solid var(--stroke2);color:var(--text);padding:8px 12px;border-radius:10px}
+    .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--stroke2);color:var(--text);padding:8px 12px;border-radius:10px}
     .modal{position:fixed;inset:0;background:#0007;display:flex;align-items:center;justify-content:center;padding:20px}
     .modal-card{width:min(560px,90vw);background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--stroke);border-radius:14px;overflow:hidden}
     .modal-h{padding:12px 14px;border-bottom:1px solid var(--stroke);font-weight:800}
     .modal-b{padding:14px;display:grid;gap:10px}
-    .field input,.field textarea,.field select{width:100%;background:#0b1224;border:1px solid var(--stroke2);color:var(--text);padding:10px 12px;border-radius:10px}
-    .sectionHead{background:#0b1224;border:1px solid var(--stroke2);border-radius:10px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;margin-top:10px}
+    .field input,.field textarea,.field select{width:100%;background:var(--panel2);border:1px solid var(--stroke2);color:var(--text);padding:10px 12px;border-radius:10px}
+    .sectionHead{background:var(--panel2);border:1px solid var(--stroke2);border-radius:10px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;margin-top:10px}
   `;
 
   return (
@@ -118,7 +144,12 @@ export default function YouTubeContentStudio(){
           <div className="toolbar">
             <button className="btn" onClick={()=> fileInputRef.current?.click()}>📥 Import</button>
             <button className="btn" onClick={exportJson}>📤 Export</button>
-            <button className="btn primary" onClick={createVideo}>➕ New Video</button>
+            <button className="btn" onClick={createVideo}>➕ New Video</button>
+            <select className="input" style={{minWidth:120}} value={mode} onChange={(e)=> setMode(e.target.value)} title="Theme">
+              <option value="system">🖥️ System</option>
+              <option value="light">☀️ Light</option>
+              <option value="dark">🌙 Dark</option>
+            </select>
             <input ref={fileInputRef} type="file" accept="application/json" style={{display:'none'}} onChange={(e)=>{ const f=e.target.files?.[0]; if(f) onImport(f); e.currentTarget.value=""; }} />
           </div>
         </div>
